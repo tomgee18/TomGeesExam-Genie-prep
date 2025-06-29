@@ -1,17 +1,17 @@
-
 import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Upload, FileText, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { processPDF, PDFExtractionResult } from '@/lib/pdfProcessor';
 
 interface PDFUploaderProps {
-  onUpload: (content: string) => void;
+  onUpload: (result: PDFExtractionResult) => void;
 }
 
 const PDFUploader = ({ onUpload }: PDFUploaderProps) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [processingStatus, setProcessingStatus] = useState('');
   const { toast } = useToast();
 
   const handleFile = async (file: File) => {
@@ -24,56 +24,32 @@ const PDFUploader = ({ onUpload }: PDFUploaderProps) => {
       return;
     }
 
+    if (file.size > 10 * 1024 * 1024) { // 10MB limit
+      toast({
+        title: "File too large",
+        description: "Please upload a PDF file smaller than 10MB.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsProcessing(true);
+    setProcessingStatus('Reading PDF file...');
     
     try {
-      // Simulate PDF processing for now
-      // In a real implementation, you'd use pdf-js or similar library
-      const simulatedContent = `
-        # Sample PDF Content
-
-        ## Introduction to Computer Science
-        Computer science is the study of computational systems and the design of computer systems and their uses in computing. It includes the study of algorithms, data structures, and computational complexity.
-
-        ### Key Topics:
-        - Programming fundamentals
-        - Data structures and algorithms
-        - Computer architecture
-        - Operating systems
-        - Database systems
-        - Software engineering
-        - Computer networks
-        - Artificial intelligence
-
-        ## Programming Fundamentals
-        Programming is the process of creating a set of instructions that tell a computer how to perform a task. Programming can be done using a variety of computer programming languages.
-
-        ### Variables and Data Types
-        Variables are containers for storing data values. Different programming languages support different data types including:
-        - Integers (whole numbers)
-        - Floating-point numbers (decimals)
-        - Strings (text)
-        - Booleans (true/false)
-        - Arrays (collections of data)
-
-        ### Control Structures
-        Control structures determine the flow of program execution:
-        - Conditional statements (if/else)
-        - Loops (for, while)
-        - Functions and procedures
-        - Error handling
-
-        This is a simulated extraction from file: ${file.name}
-      `;
-
-      // Simulate processing delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      const result = await processPDF(file);
       
-      onUpload(simulatedContent);
+      setProcessingStatus('Analyzing content structure...');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      setProcessingStatus('Extracting topics and sections...');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      onUpload(result);
       
       toast({
         title: "PDF processed successfully!",
-        description: `Extracted content from ${file.name}`,
+        description: `Extracted ${result.chunks.length} sections from ${result.totalPages} pages`,
       });
     } catch (error) {
       console.error('Error processing PDF:', error);
@@ -84,6 +60,7 @@ const PDFUploader = ({ onUpload }: PDFUploaderProps) => {
       });
     } finally {
       setIsProcessing(false);
+      setProcessingStatus('');
     }
   };
 
@@ -129,7 +106,10 @@ const PDFUploader = ({ onUpload }: PDFUploaderProps) => {
         <div className="space-y-4">
           <Loader2 className="w-12 h-12 animate-spin mx-auto text-blue-600" />
           <h3 className="text-lg font-medium">Processing your PDF...</h3>
-          <p className="text-gray-600">Extracting content and analyzing structure</p>
+          <p className="text-gray-600">{processingStatus}</p>
+          <div className="w-full bg-gray-200 rounded-full h-2">
+            <div className="bg-blue-600 h-2 rounded-full animate-pulse" style={{ width: '60%' }}></div>
+          </div>
         </div>
       ) : (
         <div className="space-y-4">
