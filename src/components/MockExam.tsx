@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -7,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Clock, CheckCircle, XCircle, Timer } from 'lucide-react';
 
 interface MockExamProps {
+  examConfig?: any;
   onComplete: () => void;
 }
 
@@ -19,10 +19,10 @@ interface Question {
   explanation: string;
 }
 
-const MockExam = ({ onComplete }: MockExamProps) => {
+const MockExam = ({ examConfig, onComplete }: MockExamProps) => {
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState<Record<string, any>>({});
-  const [timeLeft, setTimeLeft] = useState(1800); // 30 minutes
+  const [timeLeft, setTimeLeft] = useState(examConfig?.timeLimit ? examConfig.timeLimit * 60 : 1800); // Use config time or default 30 minutes
   const [showResults, setShowResults] = useState(false);
   const [userAnswer, setUserAnswer] = useState<string>('');
 

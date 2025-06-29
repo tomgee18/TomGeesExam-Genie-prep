@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -9,13 +8,15 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Settings, BookOpen } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { PDFExtractionResult } from '@/lib/pdfProcessor';
 
 interface ExamGeneratorProps {
   content: string;
+  pdfResult: PDFExtractionResult | null;
   onStartExam: () => void;
 }
 
-const ExamGenerator = ({ content, onStartExam }: ExamGeneratorProps) => {
+const ExamGenerator = ({ content, pdfResult, onStartExam }: ExamGeneratorProps) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [mcqCount, setMcqCount] = useState([5]);
   const [fillBlankCount, setFillBlankCount] = useState([3]);
@@ -25,14 +26,16 @@ const ExamGenerator = ({ content, onStartExam }: ExamGeneratorProps) => {
   const [timeLimit, setTimeLimit] = useState([30]);
   const { toast } = useToast();
 
-  // Extract topics from content (simplified)
-  const extractedTopics = [
-    'Introduction to Computer Science',
-    'Programming Fundamentals',
-    'Data Structures',
-    'Variables and Data Types',
-    'Control Structures'
-  ];
+  // Use topics from PDF if available, otherwise use default topics
+  const extractedTopics = pdfResult?.topics.length 
+    ? pdfResult.topics 
+    : [
+        'Introduction to Computer Science',
+        'Programming Fundamentals',
+        'Data Structures',
+        'Variables and Data Types',
+        'Control Structures'
+      ];
 
   const handleTopicToggle = (topic: string) => {
     setSelectedTopics(prev => 
