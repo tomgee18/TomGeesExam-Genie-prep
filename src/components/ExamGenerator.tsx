@@ -13,12 +13,13 @@ import { generateQuestions, GeminiQuestion, QuestionGenerationRequest } from '@/
 import { Progress } from '@/components/ui/progress'; // For showing generation progress
 
 interface ExamGeneratorProps {
-  content: string; // This is fullText from EnhancedPDFResult
-  pdfResult: EnhancedPDFResult | null; // Changed from PDFExtractionResult
-  onStartExam: (questions: GeminiQuestion[], timeLimitMinutes: number) => void; // Modified to pass questions
+  apiKey: string; // Added apiKey prop
+  content: string;
+  pdfResult: EnhancedPDFResult | null;
+  onStartExam: (questions: GeminiQuestion[], timeLimitMinutes: number) => void;
 }
 
-const ExamGenerator = ({ content, pdfResult, onStartExam }: ExamGeneratorProps) => {
+const ExamGenerator = ({ apiKey, content, pdfResult, onStartExam }: ExamGeneratorProps) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState<{value: number, message: string} | null>(null);
   const [mcqCount, setMcqCount] = useState([5]);
@@ -80,8 +81,20 @@ const ExamGenerator = ({ content, pdfResult, onStartExam }: ExamGeneratorProps) 
       difficulty: difficulty as 'basic' | 'intermediate' | 'advanced',
     };
 
+    if (!apiKey) {
+      toast({
+        title: "API Key Missing",
+        description: "Please provide a Gemini API key in the settings on the home page.",
+        variant: "destructive",
+      });
+      setIsGenerating(false);
+      setGenerationProgress(null);
+      return;
+    }
+
     try {
       const generatedQuestions = await generateQuestions(
+        apiKey, // Pass the apiKey
         request.content,
         request,
         (progress) => setGenerationProgress(progress)

@@ -12,7 +12,8 @@ import { useToast } from '@/hooks/use-toast';
 
 
 interface ChatAssistantProps {
-  content: string; // This is fullText from EnhancedPDFResult
+  apiKey: string; // Added apiKey prop
+  content: string;
   pdfResult: EnhancedPDFResult | null;
 }
 
@@ -23,7 +24,7 @@ interface Message {
   timestamp: Date;
 }
 
-const ChatAssistant = ({ content, pdfResult }: ChatAssistantProps) => {
+const ChatAssistant = ({ apiKey, content, pdfResult }: ChatAssistantProps) => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -61,16 +62,27 @@ const ChatAssistant = ({ content, pdfResult }: ChatAssistantProps) => {
     setIsLoading(true);
     setChatProgress({ value: 0, message: "Sending..." });
 
-    // API Key should be passed from props/context in a real app
-    // For now, it's read from geminiApi.ts (which is bad practice for production)
-    // This component itself doesn't know the key, it's an argument to chatWithContent
-    const apiKeyFromSomewhere = "NEEDS_TO_BE_PASSED_IN_OR_FROM_CONTEXT"; // Placeholder
+    if (!apiKey) {
+      const errorResponseMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        type: 'assistant',
+        content: "API Key is missing. Please set it on the home page to use the chat assistant.",
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorResponseMessage]);
+      setIsLoading(false);
+      setChatProgress(null);
+      toast({
+        title: "API Key Missing",
+        description: "Please provide a Gemini API key to use the chat assistant.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     try {
-      // TODO: Replace "apiKeyFromSomewhere" with the actual API key from app state/context
-      // For now, this will cause an error if not manually updated in the local geminiApi.ts or passed correctly
       const assistantResponseText = await chatWithContent(
-        apiKeyFromSomewhere, // This needs to be sourced correctly
+        apiKey, // Use the apiKey prop
         content,
         userMessage.content,
         (progress) => setChatProgress(progress)
