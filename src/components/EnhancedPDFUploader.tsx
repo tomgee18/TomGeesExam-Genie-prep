@@ -32,9 +32,17 @@ const EnhancedPDFUploader = ({ onUpload }: EnhancedPDFUploaderProps) => {
       
       onUpload(result);
       
+      let toastDescription = `Extracted ${result.chunks.length} sections from ${result.totalPages} pages.`;
+      if (result.metadata.warnings && result.metadata.warnings.length > 0) {
+        toastDescription += `\nWarnings:\n- ${result.metadata.warnings.join('\n- ')}`;
+      }
+
       toast({
-        title: "PDF processed successfully!",
-        description: `Extracted ${result.chunks.length} sections from ${result.totalPages} pages`,
+        title: result.metadata.warnings && result.metadata.warnings.length > 0
+               ? "PDF processed with warnings"
+               : "PDF processed successfully!",
+        description: toastDescription,
+        duration: (result.metadata.warnings && result.metadata.warnings.length > 0) ? 10000 : 5000, // Longer duration if there are warnings
       });
 
       // Reset retry count on success
