@@ -1,11 +1,21 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react"; // Added useEffect
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Upload, BookOpen, Clock, Timer, ArrowLeft, KeyRound } from "lucide-react";
+import { Upload, BookOpen, Clock, Timer, ArrowLeft, KeyRound, Settings } from "lucide-react"; // Added Settings icon
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
 import EnhancedPDFUploader from "@/components/EnhancedPDFUploader";
 import ExamGenerator from "@/components/ExamGenerator";
 import ChatAssistant from "@/components/ChatAssistant";
@@ -13,26 +23,36 @@ import MockExam from "@/components/MockExam";
 import ExamCreator from "@/components/ExamCreator";
 import TimedPractice from "@/components/TimedPractice";
 import { EnhancedPDFResult } from "@/lib/enhancedPdfProcessor";
+import { GeminiQuestion } from "@/lib/geminiApi"; // Import GeminiQuestion
+
+// Define interface for ExamConfig
+interface ExamConfig {
+  questions?: GeminiQuestion[]; // Optional for timed mode without generated questions
+  timeLimit: number;
+  mode: 'generated' | 'timed';
+}
 
 const Index = () => {
   const [currentView, setCurrentView] = useState<'home' | 'creator' | 'generator' | 'chat' | 'exam' | 'timed'>('home');
   const [pdfContent, setPDFContent] = useState<EnhancedPDFResult | null>(null);
-  const [examConfig, setExamConfig] = useState<any>(null); // Consider defining a proper type for examConfig
-  const [geminiApiKey, setGeminiApiKey] = useState<string>(() => {
-    // Initialize API key from localStorage if available, for convenience during a session
-    return localStorage.getItem("geminiApiKey") || "";
-  });
+  const [examConfig, setExamConfig] = useState<ExamConfig | null>(null); // Apply the interface
+  const [geminiApiKey, setGeminiApiKey] = useState<string>("");
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
-  const handleApiKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newKey = e.target.value;
+  // Load API key from sessionStorage on initial component mount
+  useEffect(() => {
+    const storedApiKey = sessionStorage.getItem("geminiApiKey");
+    if (storedApiKey) {
+      setGeminiApiKey(storedApiKey);
+    }
+  }, []);
+
+  const handleApiKeyChangeAndSave = (newKey: string) => {
     setGeminiApiKey(newKey);
-    // Persist to localStorage so user doesn't have to re-enter it on page refresh (during the same session/browser)
-    // For more robust persistence across sessions or if privacy is a concern for the key,
-    // this might be removed or made optional.
     if (newKey) {
-      localStorage.setItem("geminiApiKey", newKey);
+      sessionStorage.setItem("geminiApiKey", newKey);
     } else {
-      localStorage.removeItem("geminiApiKey");
+      sessionStorage.removeItem("geminiApiKey");
     }
   };
 
@@ -104,29 +124,7 @@ const Index = () => {
               </p>
             </div>
 
-            {/* API Key Input - Only shown on home view for simplicity */}
-            {currentView === 'home' && (
-              <Card className="mb-6">
-                <CardContent className="p-6 space-y-3">
-                  <div className="flex items-center space-x-2">
-                    <KeyRound className="w-5 h-5 text-yellow-500" />
-                    <Label htmlFor="gemini-api-key" className="text-lg font-semibold">Google Gemini API Key</Label>
-                  </div>
-                  <Input
-                    id="gemini-api-key"
-                    type="password" // Use password type to obscure the key
-                    placeholder="Enter your Gemini API Key here to enable AI features"
-                    value={geminiApiKey}
-                    onChange={handleApiKeyChange}
-                    className="text-sm"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Your API key is stored in your browser's local storage for convenience during your session. It is not sent anywhere except directly to Google's Gemini API from your browser.
-                    <a href="https://aistudio.google.com/getting-started" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline ml-1">Get an API Key</a>.
-                  </p>
-                </CardContent>
-              </Card>
-            )}
+            {/* API Key Input - Removed from here, will be in modal */}
 
             {/* PDF Upload Section */}
             <Card className="border-2 border-dashed border-primary/20 hover:border-primary/40 transition-colors">
@@ -226,9 +224,55 @@ const Index = () => {
               Back to Home
             </Button>
           ) : (
+             {/* Placeholder for potential future home-specific nav items */}
             <div />
           )}
-          <ThemeToggle />
+          <div className="flex items-center space-x-2">
+            <Dialog open={isSettingsModalOpen} onOpenChange={setIsSettingsModalOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="icon">
+                  <Settings className="h-5 w-5" />
+                  <span className="sr-only">Open Settings</span>
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Settings</DialogTitle>
+                  <DialogDescription>
+                    Manage your application settings here.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="gemini-api-key-modal" className="flex items-center">
+                      <KeyRound className="w-4 h-4 mr-2 text-yellow-500" />
+                      Google Gemini API Key
+                    </Label>
+                    <Input
+                      id="gemini-api-key-modal"
+                      type="password"
+                      placeholder="Enter your Gemini API Key"
+                      value={geminiApiKey}
+                      onChange={(e) => handleApiKeyChangeAndSave(e.target.value)}
+                    />
+                     <p className="text-xs text-muted-foreground">
+                      Your API key is stored in your browser's session storage for this session only.
+                      It is sent directly to Google's Gemini API from your browser.
+                      <a href="https://aistudio.google.com/getting-started" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline ml-1">Get an API Key</a>.
+                    </p>
+                  </div>
+                </div>
+                <DialogFooter className="sm:justify-start">
+                  <DialogClose asChild>
+                    <Button type="button" variant="secondary">
+                      Close
+                    </Button>
+                  </DialogClose>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+            <ThemeToggle />
+          </div>
         </div>
       </div>
 
