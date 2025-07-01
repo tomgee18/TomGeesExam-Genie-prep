@@ -24,8 +24,12 @@ export interface QuestionGenerationRequest {
   difficulty: 'basic' | 'intermediate' | 'advanced';
 }
 
-const callGeminiApi = async (apiKey: string, prompt: string): Promise<string> => {
+const MAX_RETRIES = 2;
+const INITIAL_RETRY_DELAY_MS = 1000;
+
+const callGeminiApi = async (apiKey: string, prompt: string, attempt: number = 1): Promise<string> => {
   if (!apiKey || apiKey === "YOUR_GEMINI_API_KEY_HERE" || apiKey.trim() === "") {
+    // This error should ideally be caught before calling if API key comes from user input
     throw new Error("A valid Gemini API key is required. Please provide one.");
   }
   const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_API_MODEL}:generateContent?key=${apiKey}`;
@@ -37,42 +41,89 @@ const callGeminiApi = async (apiKey: string, prompt: string): Promise<string> =>
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        contents: [{
-          parts: [{ text: prompt }],
-        }],
-        // Optional: Add generationConfig or safetySettings if needed
-        // generationConfig: {
-        //   temperature: 0.7,
-        //   topK: 1,
-        //   topP: 1,
-        //   maxOutputTokens: 8192,
-        // },
+        contents: [{ parts: [{ text: prompt }] }],
+        // Consider adding safetySettings if not globally configured for the API key
         // safetySettings: [
-        //   { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },
-        //   // ... other safety settings
+        //   { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+        //   { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+        //   { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+        //   { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
         // ],
       }),
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ message: response.statusText }));
-      console.error('Gemini API Error Response:', errorData);
-      throw new Error(`Gemini API Error: ${response.status} ${errorData.error?.message || errorData.message || 'Unknown error'}`);
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        // If parsing error response fails, use status text
+        errorData = { error: { message: response.statusText } };
+      }
+
+      console.error('Gemini API Error Response:', { status: response.status, data: errorData });
+
+      // Retry logic for specific server-side errors or rate limits
+      if ((response.status === 429 || response.status >= 500) && attempt <= MAX_RETRIES) {
+        const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt - 1);
+        console.warn(`Gemini API Error (Status ${response.status}). Retrying attempt ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return callGeminiApi(apiKey, prompt, attempt + 1);
+      }
+
+      // Map status codes to user-friendly messages
+      let userMessage = `API Error (${response.status}): ${errorData.error?.message || 'An unknown error occurred with the AI service.'}`;
+      if (response.status === 400) {
+        userMessage = `There was an issue with the request sent to the AI service (Error 400). Details: ${errorData.error?.message || 'Invalid request.'}`;
+        if (errorData.error?.message?.includes("API key not valid")) {
+            userMessage = "The provided API key is not valid. Please check your API key and try again.";
+        } else if (errorData.error?.message?.includes("billing")){
+            userMessage = "There might be an issue with billing for your API key or the free tier is not available in your region. Please check your Google AI Studio project settings.";
+        }
+      } else if (response.status === 403) {
+        userMessage = "The API key does not have the required permissions, or is incorrect (Error 403). Please check your API key.";
+      } else if (response.status === 429) {
+        userMessage = "The AI service is currently busy or rate limits have been exceeded (Error 429). Please try again in a few moments.";
+      } else if (response.status >= 500) {
+        userMessage = `The AI service encountered a temporary issue (Error ${response.status}). Please try again shortly.`;
+      }
+      throw new Error(userMessage);
     }
 
     const data = await response.json();
 
-    if (!data.candidates || !data.candidates[0]?.content?.parts[0]?.text) {
-      console.error('Gemini API Unexpected Response Format:', data);
-      throw new Error('Gemini API Error: Unexpected response format or empty content.');
+    // Handle cases where the prompt or response was blocked due to safety settings
+    if (data.promptFeedback?.blockReason) {
+      console.warn('Gemini API: Prompt blocked due to safety settings:', data.promptFeedback.blockReason);
+      throw new Error(`Your request was blocked by the AI's safety filters (Reason: ${data.promptFeedback.blockReason}). Please revise your input.`);
     }
+    if (!data.candidates || data.candidates.length === 0) {
+        if(data.candidates && data.candidates[0]?.finishReason === "SAFETY") {
+             console.warn('Gemini API: Response candidate blocked due to safety settings.');
+             throw new Error("The AI's response was blocked due to safety filters. Try rephrasing your request or adjusting safety settings if possible.");
+        }
+      console.error('Gemini API Unexpected Response Format: No candidates.', data);
+      throw new Error('The AI service returned an empty or unexpected response. Please try again.');
+    }
+    if (!data.candidates[0].content?.parts[0]?.text) {
+       // Check if the content is missing because of a finish reason like SAFETY
+      if (data.candidates[0].finishReason && data.candidates[0].finishReason !== "STOP") {
+        console.warn(`Gemini API: Candidate finished with reason: ${data.candidates[0].finishReason}`);
+        throw new Error(`The AI couldn't generate a response (Reason: ${data.candidates[0].finishReason}). This might be due to safety filters or other limitations. Please try modifying your request.`);
+      }
+      console.error('Gemini API Unexpected Response Format: Missing text in content part.', data);
+      throw new Error('The AI service returned an improperly formatted response. Please try again.');
+    }
+
     return data.candidates[0].content.parts[0].text;
+
   } catch (error) {
-    console.error('Error calling Gemini API:', error);
-    if (error instanceof Error && error.message.startsWith('Gemini API Error:')) {
-      throw error;
+    console.error('Error calling Gemini API (outer catch):', error);
+    if (error instanceof Error && (error.message.startsWith('API Error') || error.message.startsWith('The AI') || error.message.startsWith('Your request was blocked') || error.message.startsWith("A valid Gemini API key"))) {
+      throw error; // Re-throw known, user-friendly errors
     }
-    throw new Error(`Failed to connect to Gemini API: ${error instanceof Error ? error.message : String(error)}`);
+    // For other errors (e.g., network issues), provide a generic message
+    throw new Error(`Failed to connect to the AI service. Please check your internet connection and try again. (${error instanceof Error ? error.message : String(error)})`);
   }
 };
 

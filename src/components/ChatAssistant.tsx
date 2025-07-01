@@ -61,36 +61,60 @@ const ChatAssistant = ({ content, pdfResult }: ChatAssistantProps) => {
     setIsLoading(true);
     setChatProgress({ value: 0, message: "Sending..." });
 
+    // API Key should be passed from props/context in a real app
+    // For now, it's read from geminiApi.ts (which is bad practice for production)
+    // This component itself doesn't know the key, it's an argument to chatWithContent
+    const apiKeyFromSomewhere = "NEEDS_TO_BE_PASSED_IN_OR_FROM_CONTEXT"; // Placeholder
+
     try {
+      // TODO: Replace "apiKeyFromSomewhere" with the actual API key from app state/context
+      // For now, this will cause an error if not manually updated in the local geminiApi.ts or passed correctly
       const assistantResponseText = await chatWithContent(
-        content, // Full document text
+        apiKeyFromSomewhere, // This needs to be sourced correctly
+        content,
         userMessage.content,
         (progress) => setChatProgress(progress)
       );
-      
+
       const aiResponseMessage: Message = {
         id: (Date.now() + 1).toString(),
         type: 'assistant',
-        content: assistantResponseText,
+        content: assistantResponseText, // This will include error messages from geminiApi.ts
         timestamp: new Date()
       };
       setMessages(prev => [...prev, aiResponseMessage]);
 
-    } catch (error) { // This catch might not be strictly necessary if chatWithContent itself returns error messages
-      console.error('Error getting AI response in component:', error);
-      const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred while fetching the response.";
-      const errorResponseMessage: Message = {
+      // If the response text itself indicates an error propagated from geminiApi.ts,
+      // we might not need an additional toast, as it's already in the chat.
+      if (assistantResponseText.startsWith("Error communicating with AI:") ||
+          assistantResponseText.startsWith("Sorry, I encountered an error:")) {
+        // Optionally, still show a toast for critical API errors if desired,
+        // but it might be redundant if the error is clearly in chat.
+        // For now, let the error message in chat suffice.
+      }
+
+    } catch (error) {
+      // This catch block handles errors thrown by chatWithContent if it doesn't return a string
+      // (e.g., API key not provided error before the actual API call attempt in chatWithContent)
+      // or other unexpected errors within this component's try block.
+      console.error('Error in handleSendMessage:', error);
+      const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred.";
+
+      // Add error message to chat
+      const errorChatMsg: Message = {
         id: (Date.now() + 1).toString(),
         type: 'assistant',
-        content: `Sorry, I encountered an error: ${errorMessage}`,
+        content: `Sorry, an application error occurred: ${errorMessage}`,
         timestamp: new Date()
       };
-      setMessages(prev => [...prev, errorResponseMessage]);
+      setMessages(prev => [...prev, errorChatMsg]);
+
+      // Also show a toast for these types of errors
       toast({
-        title: "Chat Error",
+        title: "Chat Application Error",
         description: errorMessage,
         variant: "destructive"
-      })
+      });
     } finally {
       setIsLoading(false);
       setChatProgress(null);
