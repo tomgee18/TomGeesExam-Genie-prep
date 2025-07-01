@@ -8,16 +8,19 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Settings, BookOpen } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { PDFExtractionResult } from '@/lib/pdfProcessor';
+import { PDFExtractionResult, EnhancedPDFResult } from '@/lib/enhancedPdfProcessor'; // Assuming pdfResult is EnhancedPDFResult
+import { generateQuestions, GeminiQuestion, QuestionGenerationRequest } from '@/lib/geminiApi';
+import { Progress } from '@/components/ui/progress'; // For showing generation progress
 
 interface ExamGeneratorProps {
-  content: string;
-  pdfResult: PDFExtractionResult | null;
-  onStartExam: () => void;
+  content: string; // This is fullText from EnhancedPDFResult
+  pdfResult: EnhancedPDFResult | null; // Changed from PDFExtractionResult
+  onStartExam: (questions: GeminiQuestion[], timeLimitMinutes: number) => void; // Modified to pass questions
 }
 
 const ExamGenerator = ({ content, pdfResult, onStartExam }: ExamGeneratorProps) => {
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState<{value: number, message: string} | null>(null);
   const [mcqCount, setMcqCount] = useState([5]);
   const [fillBlankCount, setFillBlankCount] = useState([3]);
   const [trueFalseCount, setTrueFalseCount] = useState([2]);
@@ -56,26 +59,55 @@ const ExamGenerator = ({ content, pdfResult, onStartExam }: ExamGeneratorProps) 
     }
 
     setIsGenerating(true);
+    setGenerationProgress({ value: 0, message: "Preparing to generate..."});
     
+    // Content strategy: For now, use the full text.
+    // A future improvement: Filter content based on selectedTopics.
+    // This would require matching selectedTopics (strings) to pdfResult.chunks,
+    // potentially by looking at chunk headings or using a more sophisticated mapping.
+    // const relevantContent = selectedTopics.length > 0 && pdfResult?.chunks
+    //   ? pdfResult.chunks
+    //       .filter(chunk => selectedTopics.some(topic => chunk.content.toLowerCase().includes(topic.toLowerCase()))) // Naive topic matching
+    //       .map(chunk => chunk.content)
+    //       .join("\n\n") || content // Fallback to full content if no chunks match
+    //   : content;
+
+    const request: QuestionGenerationRequest = {
+      content: content, // Using full content passed as prop for now
+      mcqCount: mcqCount[0],
+      fillBlankCount: fillBlankCount[0],
+      trueFalseCount: trueFalseCount[0],
+      difficulty: difficulty as 'basic' | 'intermediate' | 'advanced',
+    };
+
     try {
-      // Simulate exam generation
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      const generatedQuestions = await generateQuestions(
+        request.content,
+        request,
+        (progress) => setGenerationProgress(progress)
+      );
       
       toast({
         title: "Exam generated successfully!",
-        description: `Created ${mcqCount[0] + fillBlankCount[0] + trueFalseCount[0]} questions`,
+        description: `Created ${generatedQuestions.length} questions.`,
       });
       
-      onStartExam();
+      // Pass generated questions and time limit to the parent component
+      onStartExam(generatedQuestions, timeLimit[0]);
+
     } catch (error) {
       console.error('Error generating exam:', error);
+      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
       toast({
-        title: "Error generating exam",
-        description: "Please try again.",
+        title: "Error Generating Exam",
+        description: errorMessage,
         variant: "destructive",
       });
+      setGenerationProgress(null); // Clear progress on error
     } finally {
       setIsGenerating(false);
+      // Optionally clear progress after a delay or keep it to show completion/error
+      // setTimeout(() => setGenerationProgress(null), 3000);
     }
   };
 
@@ -85,8 +117,18 @@ const ExamGenerator = ({ content, pdfResult, onStartExam }: ExamGeneratorProps) 
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="text-center space-y-2">
         <h2 className="text-3xl font-bold">Generate Mock Exam</h2>
-        <p className="text-gray-600">Customize your exam settings and generate AI-powered questions</p>
+        <p className="text-muted-foreground">Customize your exam settings and generate AI-powered questions</p>
       </div>
+
+      {isGenerating && generationProgress && (
+        <Card>
+          <CardContent className="p-4">
+            <Label className="text-sm font-medium">{generationProgress.message}</Label>
+            <Progress value={generationProgress.value} className="w-full mt-2" />
+            <p className="text-xs text-muted-foreground mt-1 text-center">{generationProgress.value}% complete</p>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid md:grid-cols-2 gap-6">
         {/* Question Settings */}
@@ -99,8 +141,9 @@ const ExamGenerator = ({ content, pdfResult, onStartExam }: ExamGeneratorProps) 
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-3">
-              <Label>Multiple Choice Questions: {mcqCount[0]}</Label>
+              <Label htmlFor="mcq-slider">Multiple Choice Questions: {mcqCount[0]}</Label>
               <Slider
+                id="mcq-slider"
                 value={mcqCount}
                 onValueChange={setMcqCount}
                 min={0}

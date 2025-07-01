@@ -5,11 +5,15 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { BookOpen, Send, Loader2, User, Bot } from 'lucide-react';
-import { PDFExtractionResult } from '@/lib/pdfProcessor';
+// Assuming pdfResult will be EnhancedPDFResult from Index.tsx
+import { EnhancedPDFResult } from '@/lib/enhancedPdfProcessor';
+import { chatWithContent } from '@/lib/geminiApi';
+import { useToast } from '@/hooks/use-toast';
+
 
 interface ChatAssistantProps {
-  content: string;
-  pdfResult: PDFExtractionResult | null;
+  content: string; // This is fullText from EnhancedPDFResult
+  pdfResult: EnhancedPDFResult | null;
 }
 
 interface Message {
@@ -30,7 +34,9 @@ const ChatAssistant = ({ content, pdfResult }: ChatAssistantProps) => {
   ]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [chatProgress, setChatProgress] = useState<{ value: number; message: string } | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const { toast } = useToast();
 
   const suggestedQuestions = [
     "Summarize the key concepts from this document",
@@ -53,51 +59,45 @@ const ChatAssistant = ({ content, pdfResult }: ChatAssistantProps) => {
     setMessages(prev => [...prev, userMessage]);
     setInputMessage('');
     setIsLoading(true);
+    setChatProgress({ value: 0, message: "Sending..." });
 
     try {
-      // Simulate AI response based on the content
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      const assistantResponseText = await chatWithContent(
+        content, // Full document text
+        userMessage.content,
+        (progress) => setChatProgress(progress)
+      );
       
-      const aiResponse: Message = {
+      const aiResponseMessage: Message = {
         id: (Date.now() + 1).toString(),
         type: 'assistant',
-        content: generateAIResponse(inputMessage, content),
+        content: assistantResponseText,
         timestamp: new Date()
       };
+      setMessages(prev => [...prev, aiResponseMessage]);
 
-      setMessages(prev => [...prev, aiResponse]);
-    } catch (error) {
-      console.error('Error getting AI response:', error);
+    } catch (error) { // This catch might not be strictly necessary if chatWithContent itself returns error messages
+      console.error('Error getting AI response in component:', error);
+      const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred while fetching the response.";
+      const errorResponseMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        type: 'assistant',
+        content: `Sorry, I encountered an error: ${errorMessage}`,
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorResponseMessage]);
+      toast({
+        title: "Chat Error",
+        description: errorMessage,
+        variant: "destructive"
+      })
     } finally {
       setIsLoading(false);
+      setChatProgress(null);
     }
   };
 
-  const generateAIResponse = (question: string, documentContent: string): string => {
-    const lowerQuestion = question.toLowerCase();
-    
-    if (lowerQuestion.includes('summary') || lowerQuestion.includes('summarize')) {
-      return "Based on your document, here are the key concepts:\n\n• **Computer Science Fundamentals**: The study of computational systems and algorithm design\n• **Programming Basics**: Variables, data types, and control structures\n• **Data Structures**: Arrays, lists, and their applications\n• **Software Development**: Best practices and methodologies\n\nThese topics form the foundation for understanding more advanced computer science concepts.";
-    }
-    
-    if (lowerQuestion.includes('main topics') || lowerQuestion.includes('topics covered')) {
-      return "The main topics covered in your document include:\n\n1. **Introduction to Computer Science**\n2. **Programming Fundamentals**\n3. **Data Structures and Algorithms**\n4. **Variables and Data Types**\n5. **Control Structures**\n\nEach topic builds upon the previous ones, creating a comprehensive learning path.";
-    }
-    
-    if (lowerQuestion.includes('practice questions') || lowerQuestion.includes('questions')) {
-      return "Here are 3 practice questions based on your document:\n\n**Question 1 (MCQ)**: What is a variable in programming?\na) A fixed value\nb) A container for storing data\nc) A type of loop\nd) A function\n\n**Question 2 (Fill in the blank)**: _______ structures determine the flow of program execution.\n\n**Question 3 (True/False)**: Arrays can only store numbers. (False)\n\nWould you like me to create more questions or explain any of these concepts?";
-    }
-    
-    if (lowerQuestion.includes('data structures')) {
-      return "Data structures are ways of organizing and storing data so it can be used efficiently. From your document:\n\n• **Arrays**: Collections of similar data items stored in contiguous memory\n• **Lists**: Dynamic collections that can grow or shrink\n• **Variables**: Basic containers for single data values\n\nThink of data structures like different types of containers - arrays are like egg cartons (fixed size), while lists are like shopping bags (flexible size).";
-    }
-    
-    if (lowerQuestion.includes('exam') || lowerQuestion.includes('focus')) {
-      return "For your exam preparation, I recommend focusing on:\n\n**High Priority:**\n• Variable types and declarations\n• Control structures (if/else, loops)\n• Basic data structure concepts\n\n**Medium Priority:**\n• Programming terminology\n• Algorithm basics\n• Problem-solving approaches\n\n**Study Tips:**\n• Practice coding examples\n• Understand concepts, don't just memorize\n• Work through problems step by step\n\nWould you like me to create specific practice problems for any of these areas?";
-    }
-    
-    return `I understand you're asking about "${question}". Based on your uploaded document about computer science fundamentals, I can help explain concepts, create practice questions, or provide study guidance. Could you be more specific about what aspect you'd like to explore? For example, you could ask about specific topics like programming, data structures, or exam preparation strategies.`;
-  };
+  // const generateAIResponse = (question: string, documentContent: string): string => { ... } // This function is now removed
 
   const handleSuggestedQuestion = (question: string) => {
     setInputMessage(question);
