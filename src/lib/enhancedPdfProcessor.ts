@@ -50,16 +50,24 @@ export class PDFProcessingError extends Error {
   }
 }
 
-// Enhanced token estimation
+
+/**
+ * Estimate the number of tokens in a string (approximate, for chunking).
+ * @param text The text to estimate tokens for.
+ * @returns Estimated token count.
+ */
 const estimateTokens = (text: string): number => {
   return Math.ceil(text.length / 4);
 };
 
-// Advanced heading extraction
+/**
+ * Extract likely headings from text using regex patterns.
+ * @param text The text to extract headings from.
+ * @returns Array of unique headings (max 30).
+ */
 const extractHeadings = (text: string): string[] => {
   const headings: string[] = [];
   const lines = text.split('\n');
-  
   for (const line of lines) {
     const trimmedLine = line.trim();
     if (trimmedLine.length > 0 && trimmedLine.length < 100) {
@@ -74,11 +82,18 @@ const extractHeadings = (text: string): string[] => {
       }
     }
   }
-  
   return [...new Set(headings)].slice(0, 30);
 };
 
-// Enhanced chunking with context preservation and real PDF page numbers
+/**
+ * Chunk text into segments, mapping each chunk to real PDF page numbers.
+ * Includes input validation and warnings for best practices.
+ * @param text The full extracted text.
+ * @param paragraphPageMap Array mapping each paragraph to its PDF page number.
+ * @param maxTokens Maximum tokens per chunk.
+ * @returns Array of EnhancedPDFChunk objects.
+ * @throws Error if input validation fails.
+ */
 const chunkText = (
   text: string,
   paragraphPageMap: number[],
@@ -86,6 +101,14 @@ const chunkText = (
 ): EnhancedPDFChunk[] => {
   const chunks: EnhancedPDFChunk[] = [];
   const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+
+  // Input validation
+  if (!Array.isArray(paragraphPageMap) || !paragraphPageMap.every(n => typeof n === 'number')) {
+    throw new Error('paragraphPageMap must be an array of numbers.');
+  }
+  if (paragraphPageMap.length !== paragraphs.length) {
+    throw new Error(`paragraphPageMap length (${paragraphPageMap.length}) does not match paragraphs length (${paragraphs.length}).`);
+  }
 
   let currentChunk = '';
   let chunkStart = 0;
@@ -97,13 +120,15 @@ const chunkText = (
     if (estimateTokens(potentialChunk) > maxTokens && currentChunk) {
       const startPage = paragraphPageMap[chunkStart];
       const endPage = paragraphPageMap[i - 1];
-      chunks.push({
-        content: currentChunk,
-        pageStart: startPage,
-        pageEnd: endPage,
-        tokenCount: estimateTokens(currentChunk),
-        extractionMethod: 'digital'
-      });
+      if (currentChunk.trim().length > 0) {
+        chunks.push({
+          content: currentChunk,
+          pageStart: startPage,
+          pageEnd: endPage,
+          tokenCount: estimateTokens(currentChunk),
+          extractionMethod: 'digital'
+        });
+      }
       currentChunk = paragraph;
       chunkStart = i;
     } else {
@@ -111,7 +136,7 @@ const chunkText = (
     }
   }
 
-  if (currentChunk) {
+  if (currentChunk && currentChunk.trim().length > 0) {
     const startPage = paragraphPageMap[chunkStart];
     const endPage = paragraphPageMap[paragraphs.length - 1];
     chunks.push({
@@ -125,6 +150,7 @@ const chunkText = (
 
   return chunks;
 };
+
 
 // OCR processing with preprocessing
 const processPageWithOCR = async (
@@ -143,7 +169,6 @@ const processPageWithOCR = async (
         const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
         const contrast = 1.5;
         const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
-        
         data[i] = Math.min(255, Math.max(0, factor * (data[i] - 128) + 128));
         data[i + 1] = Math.min(255, Math.max(0, factor * (data[i + 1] - 128) + 128));
         data[i + 2] = Math.min(255, Math.max(0, factor * (data[i + 2] - 128) + 128));
@@ -169,216 +194,3 @@ const processPageWithOCR = async (
   }
 };
 
-// Type guard for PDF.js text items
-function hasStr(item: any): item is { str: string } {
-  return typeof item.str === 'string';
-}
-
-// Main processing function with circuit breaker pattern
-export const processEnhancedPDF = async (
-  file: File,
-  onProgress?: (progress: ProcessingProgress) => void
-): Promise<EnhancedPDFResult> => {
-  const startTime = Date.now();
-  let ocrWorker: Tesseract.Worker | null = null;
-  let ocrInitializationError: string | null = null;
-  let ocrAttemptedOnDocument = false;
-  let ocrSucceededOnAnyPage = false;
-  const warnings: string[] = [];
-
-  try {
-    // Validate file
-    if (!file.type.includes('pdf')) {
-      throw new PDFProcessingError(
-        'Invalid file type. Please upload a PDF file.',
-        'INVALID_FILE_TYPE',
-        false
-      );
-    }
-
-    if (file.size > 50 * 1024 * 1024) {
-      throw new PDFProcessingError(
-        'File too large. Please upload a PDF smaller than 50MB.',
-        'FILE_TOO_LARGE',
-        false
-      );
-    }
-
-    onProgress?.({
-      stage: 'loading',
-      progress: 10,
-      message: 'Loading PDF document...'
-    });
-
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-    const totalPages = pdf.numPages;
-
-    onProgress?.({
-      stage: 'extracting',
-      progress: 20,
-      message: 'Extracting text from pages...'
-    });
-
-    let fullText = '';
-    let hasDigitalText = false;
-    let hasScannedContent = false;
-    let totalConfidence = 0;
-    let ocrPageCount = 0;
-    const paragraphPageMap: number[] = [];
-
-    // Process each page
-    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-      const page = await pdf.getPage(pageNum);
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items
-        .map(item => hasStr(item) ? item.str : '')
-        .join(' ');
-
-      const progress = 20 + (pageNum / totalPages) * 50;
-      
-      if (pageText.trim().length > 50) {
-        // Digital text available
-        fullText += pageText + '\n\n';
-        hasDigitalText = true;
-        // Map each paragraph to this page
-        const paragraphs = pageText.split(/\n\s*\n/).filter(p => p.trim().length > 0);
-        for (let i = 0; i < paragraphs.length; i++) {
-          paragraphPageMap.push(pageNum);
-        }
-        onProgress?.({
-          stage: 'extracting',
-          progress,
-          message: `Extracting text from page ${pageNum}/${totalPages}...`
-        });
-      } else {
-        // Likely scanned content, use OCR
-        hasScannedContent = true;
-        await initializeOcrWorkerIfNeeded();
-        if (ocrWorker && !ocrInitializationError) {
-          onProgress?.({
-            stage: 'ocr',
-            progress,
-            message: `Processing scanned content on page ${pageNum}/${totalPages}...`
-          });
-          const viewport = page.getViewport({ scale: 2.0 });
-          const canvas = document.createElement('canvas');
-          const context = canvas.getContext('2d');
-          canvas.height = viewport.height;
-          canvas.width = viewport.width;
-          if (context) {
-            await page.render({
-              canvasContext: context,
-              viewport: viewport
-            }).promise;
-            const ocrResult = await processPageWithOCR(canvas, ocrWorker);
-            if (ocrResult.text.trim()) {
-              fullText += ocrResult.text + '\n\n';
-              totalConfidence += ocrResult.confidence;
-              ocrPageCount++;
-              ocrSucceededOnAnyPage = true;
-              // Map each paragraph to this page
-              const paragraphs = ocrResult.text.split(/\n\s*\n/).filter(p => p.trim().length > 0);
-              for (let i = 0; i < paragraphs.length; i++) {
-                paragraphPageMap.push(pageNum);
-              }
-            }
-          }
-        } else if (ocrInitializationError) {
-          onProgress?.({
-            stage: 'ocr',
-            progress,
-            message: `Skipping OCR on page ${pageNum}/${totalPages} (OCR engine init failed).`
-          });
-        }
-      }
-    }
-
-    // If OCR was attempted but initialization failed, ensure this is clear.
-    if (ocrAttemptedOnDocument && ocrInitializationError && !ocrSucceededOnAnyPage) {
-        // warnings.push(ocrInitializationError); // Already added when error occurred
-    }
-
-
-    onProgress?.({
-      stage: 'chunking',
-      progress: 80,
-      message: 'Analyzing content structure...'
-    });
-
-    // Clean up text
-    fullText = fullText.replace(/\s+/g, ' ').trim();
-
-    if (!fullText && ocrInitializationError && !hasDigitalText) {
-      // If there's no text at all, AND OCR failed to initialize, AND there was no digital text,
-      // then this is a hard failure. Re-throw the OCR initialization error as critical.
-      throw new PDFProcessingError(
-        ocrInitializationError || 'OCR engine failed to initialize, and no digital text found.',
-        'OCR_INIT_FAILED_NO_TEXT',
-        false
-      );
-    } else if (!fullText && !hasDigitalText && hasScannedContent && !ocrInitializationError) {
-      // If no text, but there was scanned content and OCR init did NOT fail, it means OCR ran but found nothing.
-       throw new PDFProcessingError(
-        'No text could be extracted. The document might be image-based and OCR found no text, or it is corrupted.',
-        'NO_TEXT_EXTRACTED_OCR_EMPTY',
-        false
-      );
-    } else if (!fullText) {
-      // General case if no text is extracted
-      throw new PDFProcessingError(
-        'No text could be extracted from this PDF. The document may be corrupted or contain only images.',
-        'NO_TEXT_EXTRACTED',
-        false
-      );
-    }
-
-    // Extract topics and create chunks
-    const topics = extractHeadings(fullText);
-    const chunks = chunkText(fullText, paragraphPageMap);
-
-    const avgConfidence = ocrPageCount > 0 ? totalConfidence / ocrPageCount : 0; // Default to 0 if no OCR pages
-
-    onProgress?.({
-      stage: 'complete',
-      progress: 100,
-      message: warnings.length > 0 ? `Processing complete with warnings.` : 'Processing complete!'
-    });
-
-    return {
-      chunks,
-      totalPages,
-      topics,
-      fullText,
-      metadata: {
-        hasDigitalText,
-        hasScannedContent,
-        ocrAttempted: ocrAttemptedOnDocument,
-        ocrSucceeded: ocrSucceededOnAnyPage,
-        ocrConfidence: avgConfidence,
-        processingTime: Date.now() - startTime,
-        warnings: warnings.length > 0 ? warnings : undefined
-      }
-    };
-
-  } catch (error) {
-    if (error instanceof PDFProcessingError) {
-      throw error;
-    }
-    
-    throw new PDFProcessingError(
-      `Failed to process PDF: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      'PROCESSING_FAILED',
-      true
-    );
-  } finally {
-    // Cleanup OCR worker
-    if (ocrWorker) {
-      try {
-        await ocrWorker.terminate();
-      } catch (error) {
-        console.warn('Failed to terminate OCR worker:', error);
-      }
-    }
-  }
-};
