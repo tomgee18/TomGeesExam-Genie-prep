@@ -20,39 +20,31 @@ const EnhancedPDFUploader = ({ onUpload }: EnhancedPDFUploaderProps) => {
   const [retryCount, setRetryCount] = useState(0);
   const { toast } = useToast();
 
-  const handleFile = async (file: File) => {
+  const handleFile = useCallback(async (file: File) => {
     setError(null);
     setIsProcessing(true);
     setProgress(null);
-    
     try {
       const result = await processEnhancedPDF(file, (progressInfo) => {
         setProgress(progressInfo);
       });
-      
       onUpload(result);
-      
       let toastDescription = `Extracted ${result.chunks.length} sections from ${result.totalPages} pages.`;
       if (result.metadata.warnings && result.metadata.warnings.length > 0) {
         toastDescription += `\nWarnings:\n- ${result.metadata.warnings.join('\n- ')}`;
       }
-
       toast({
         title: result.metadata.warnings && result.metadata.warnings.length > 0
                ? "PDF processed with warnings"
                : "PDF processed successfully!",
         description: toastDescription,
-        duration: (result.metadata.warnings && result.metadata.warnings.length > 0) ? 10000 : 5000, // Longer duration if there are warnings
+        duration: (result.metadata.warnings && result.metadata.warnings.length > 0) ? 10000 : 5000,
       });
-
-      // Reset retry count on success
       setRetryCount(0);
     } catch (error) {
       console.error('Error processing PDF:', error);
-      
       if (error instanceof PDFProcessingError) {
         setError(error);
-        
         if (!error.recoverable) {
           toast({
             title: "Processing failed",
@@ -72,7 +64,7 @@ const EnhancedPDFUploader = ({ onUpload }: EnhancedPDFUploaderProps) => {
       setIsProcessing(false);
       setProgress(null);
     }
-  };
+  }, [onUpload, toast]);
 
   const handleRetry = () => {
     if (error && error.recoverable && retryCount < 3) {
@@ -108,7 +100,7 @@ const EnhancedPDFUploader = ({ onUpload }: EnhancedPDFUploaderProps) => {
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleFile(e.dataTransfer.files[0]);
     }
-  }, []);
+  }, [handleFile]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {

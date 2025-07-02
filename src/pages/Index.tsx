@@ -148,8 +148,6 @@ const Index = () => {
                   <Button className="w-full">
                     Create Exam
                   </Button>
-                    Create Exam
-                  </Button>
                 </CardContent>
               </Card>
 
@@ -224,7 +222,7 @@ const Index = () => {
               Back to Home
             </Button>
           ) : (
-             {/* Placeholder for potential future home-specific nav items */}
+            // Placeholder for potential future home-specific nav items
             <div />
           )}
           <div className="flex items-center space-x-2">

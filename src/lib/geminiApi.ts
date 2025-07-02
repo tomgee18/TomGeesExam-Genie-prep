@@ -177,7 +177,7 @@ const splitContentIntoChunks = (text: string, maxTokens: number): string[] => {
 // This is a simplified parser and might need to be very robust for production
 const parseMCQText = (textBlock: string, count: number): Omit<GeminiQuestion, 'id' | 'type'>[] => {
   const questions: Omit<GeminiQuestion, 'id' | 'type'>[] = [];
-  const questionRegex = /(\d+)\.\s(.*?)\nA\)\s(.*?)\nB\)\s(.*?)\nC\)\s(.*?)\nD)\s(.*?)\nAnswer:\s([A-D])\)\s(.*?)\nExplanation:\s(.*?)(?=\n\d+\.|\n\n|$)/gs;
+  const questionRegex = /(\d+)\.\s(.*?)\nA\)\s(.*?)\nB\)\s(.*?)\nC\)\s(.*?)\nD\)\s(.*?)\nAnswer:\s([A-D])\)\s(.*?)\nExplanation:\s(.*?)(?=\n\d+\.|\n\n|$)/gs;
   let match;
   let parsedCount = 0;
   while ((match = questionRegex.exec(textBlock)) !== null && parsedCount < count) {

@@ -1,4 +1,3 @@
-
 import * as pdfjsLib from 'pdfjs-dist';
 import { createWorker } from 'tesseract.js';
 
@@ -64,13 +63,12 @@ const extractHeadings = (text: string): string[] => {
   for (const line of lines) {
     const trimmedLine = line.trim();
     if (trimmedLine.length > 0 && trimmedLine.length < 100) {
-      // Multiple heading patterns
+      // Improved heading patterns
       if (
-        /^[A-Z][^.]*$/.test(trimmedLine) || 
-        /^\d+[\.\)]\s/.test(trimmedLine) ||
+        (/^[A-Z][A-Za-z\s\d,:;\-]{0,80}$/.test(trimmedLine) && !/[.?!]$/.test(trimmedLine)) ||
+        /^\d+[.)]\s/.test(trimmedLine) ||
         /^Chapter\s+\d+/i.test(trimmedLine) ||
-        /^Section\s+\d+/i.test(trimmedLine) ||
-        /^[A-Z\s]{3,50}$/.test(trimmedLine)
+        /^Section\s+\d+/i.test(trimmedLine)
       ) {
         headings.push(trimmedLine);
       }
@@ -80,51 +78,58 @@ const extractHeadings = (text: string): string[] => {
   return [...new Set(headings)].slice(0, 30);
 };
 
-// Enhanced chunking with context preservation
-const chunkText = (text: string, maxTokens: number = 2000): EnhancedPDFChunk[] => {
+// Enhanced chunking with context preservation and real PDF page numbers
+const chunkText = (
+  text: string,
+  paragraphPageMap: number[],
+  maxTokens: number = 2000
+): EnhancedPDFChunk[] => {
   const chunks: EnhancedPDFChunk[] = [];
   const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 0);
-  
+
   let currentChunk = '';
   let chunkStart = 0;
-  
+
   for (let i = 0; i < paragraphs.length; i++) {
     const paragraph = paragraphs[i].trim();
     const potentialChunk = currentChunk + (currentChunk ? '\n\n' : '') + paragraph;
-    
+
     if (estimateTokens(potentialChunk) > maxTokens && currentChunk) {
+      const startPage = paragraphPageMap[chunkStart];
+      const endPage = paragraphPageMap[i - 1];
       chunks.push({
         content: currentChunk,
-        pageStart: chunkStart,
-        pageEnd: i,
+        pageStart: startPage,
+        pageEnd: endPage,
         tokenCount: estimateTokens(currentChunk),
         extractionMethod: 'digital'
       });
-      
       currentChunk = paragraph;
       chunkStart = i;
     } else {
       currentChunk = potentialChunk;
     }
   }
-  
+
   if (currentChunk) {
+    const startPage = paragraphPageMap[chunkStart];
+    const endPage = paragraphPageMap[paragraphs.length - 1];
     chunks.push({
       content: currentChunk,
-      pageStart: chunkStart,
-      pageEnd: paragraphs.length - 1,
+      pageStart: startPage,
+      pageEnd: endPage,
       tokenCount: estimateTokens(currentChunk),
       extractionMethod: 'digital'
     });
   }
-  
+
   return chunks;
 };
 
 // OCR processing with preprocessing
 const processPageWithOCR = async (
   canvas: HTMLCanvasElement,
-  worker: any,
+  worker: Tesseract.Worker,
   onProgress?: (progress: number) => void
 ): Promise<{ text: string; confidence: number }> => {
   try {
@@ -147,7 +152,7 @@ const processPageWithOCR = async (
     }
 
     const result = await worker.recognize(canvas, {
-      logger: (m: any) => {
+      logger: (m: { status: string; progress: number }) => {
         if (m.status === 'recognizing text' && onProgress) {
           onProgress(m.progress);
         }
@@ -163,6 +168,11 @@ const processPageWithOCR = async (
     return { text: '', confidence: 0 };
   }
 };
+
+// Type guard for PDF.js text items
+function hasStr(item: any): item is { str: string } {
+  return typeof item.str === 'string';
+}
 
 // Main processing function with circuit breaker pattern
 export const processEnhancedPDF = async (
@@ -215,37 +225,14 @@ export const processEnhancedPDF = async (
     let hasScannedContent = false;
     let totalConfidence = 0;
     let ocrPageCount = 0;
-
-    // OCR worker will be initialized lazily if needed.
-    const initializeOcrWorkerIfNeeded = async () => {
-      if (ocrWorker || ocrInitializationError) return; // Already initialized or failed
-
-      ocrAttemptedOnDocument = true; // Mark that we are attempting OCR at least once for this document.
-      try {
-        const workerPath = new URL('/tesseract/worker.min.js', window.location.origin).toString();
-        const corePath = new URL('/tesseract/tesseract-core.wasm.js', window.location.origin).toString(); // Adjust if different core file
-        const langPath = new URL('/tesseract/lang-data', window.location.origin).toString();
-
-        ocrWorker = await createWorker('eng', 1, {
-          workerPath,
-          corePath,
-          langPath,
-          // logger: m => console.log(m) // For debugging
-        });
-      } catch (err) {
-        console.error("Failed to initialize OCR worker with local assets:", err);
-        ocrInitializationError = 'OCR engine failed to initialize. Scanned content may not be processed. Error: ' + (err instanceof Error ? err.message : String(err));
-        warnings.push(ocrInitializationError);
-        // Do not throw here, allow digital text processing to continue.
-      }
-    };
+    const paragraphPageMap: number[] = [];
 
     // Process each page
     for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
       const page = await pdf.getPage(pageNum);
       const textContent = await page.getTextContent();
       const pageText = textContent.items
-        .map((item: any) => item.str)
+        .map(item => hasStr(item) ? item.str : '')
         .join(' ');
 
       const progress = 20 + (pageNum / totalPages) * 50;
@@ -254,7 +241,11 @@ export const processEnhancedPDF = async (
         // Digital text available
         fullText += pageText + '\n\n';
         hasDigitalText = true;
-        
+        // Map each paragraph to this page
+        const paragraphs = pageText.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+        for (let i = 0; i < paragraphs.length; i++) {
+          paragraphPageMap.push(pageNum);
+        }
         onProgress?.({
           stage: 'extracting',
           progress,
@@ -263,39 +254,39 @@ export const processEnhancedPDF = async (
       } else {
         // Likely scanned content, use OCR
         hasScannedContent = true;
-        await initializeOcrWorkerIfNeeded(); // Attempt to initialize OCR worker if not already done
-
+        await initializeOcrWorkerIfNeeded();
         if (ocrWorker && !ocrInitializationError) {
           onProgress?.({
             stage: 'ocr',
             progress,
             message: `Processing scanned content on page ${pageNum}/${totalPages}...`
           });
-
           const viewport = page.getViewport({ scale: 2.0 });
           const canvas = document.createElement('canvas');
           const context = canvas.getContext('2d');
           canvas.height = viewport.height;
           canvas.width = viewport.width;
-
           if (context) {
             await page.render({
               canvasContext: context,
               viewport: viewport
             }).promise;
-
             const ocrResult = await processPageWithOCR(canvas, ocrWorker);
             if (ocrResult.text.trim()) {
               fullText += ocrResult.text + '\n\n';
               totalConfidence += ocrResult.confidence;
               ocrPageCount++;
               ocrSucceededOnAnyPage = true;
+              // Map each paragraph to this page
+              const paragraphs = ocrResult.text.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+              for (let i = 0; i < paragraphs.length; i++) {
+                paragraphPageMap.push(pageNum);
+              }
             }
           }
         } else if (ocrInitializationError) {
-          // OCR worker failed to initialize, skip OCR for this page
           onProgress?.({
-            stage: 'ocr', // Still indicate OCR stage, but with a warning/skip message
+            stage: 'ocr',
             progress,
             message: `Skipping OCR on page ${pageNum}/${totalPages} (OCR engine init failed).`
           });
@@ -344,7 +335,7 @@ export const processEnhancedPDF = async (
 
     // Extract topics and create chunks
     const topics = extractHeadings(fullText);
-    const chunks = chunkText(fullText);
+    const chunks = chunkText(fullText, paragraphPageMap);
 
     const avgConfidence = ocrPageCount > 0 ? totalConfidence / ocrPageCount : 0; // Default to 0 if no OCR pages
 

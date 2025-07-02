@@ -59,10 +59,9 @@ const chunkText = (text: string, maxTokens: number = 2000): PDFChunk[] => {
       chunks.push({
         content: currentChunk,
         pageStart: chunkStart,
-        pageEnd: chunkStart,
+        pageEnd: i - 1,
         tokenCount: estimateTokens(currentChunk)
       });
-      
       // Start new chunk
       currentChunk = sentence;
       chunkStart = i;
@@ -96,9 +95,8 @@ export const processPDF = async (file: File): Promise<PDFExtractionResult> => {
     const page = await pdf.getPage(pageNum);
     const textContent = await page.getTextContent();
     const pageText = textContent.items
-      .map((item: any) => item.str)
+      .map((item) => (typeof (item as any).str === 'string' ? (item as any).str : ''))
       .join(' ');
-    
     fullText += pageText + '\n\n';
   }
   

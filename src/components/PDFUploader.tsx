@@ -14,7 +14,7 @@ const PDFUploader = ({ onUpload }: PDFUploaderProps) => {
   const [processingStatus, setProcessingStatus] = useState('');
   const { toast } = useToast();
 
-  const handleFile = async (file: File) => {
+  const handleFile = useCallback(async (file: File) => {
     if (file.type !== 'application/pdf') {
       toast({
         title: "Invalid file type",
@@ -62,7 +62,7 @@ const PDFUploader = ({ onUpload }: PDFUploaderProps) => {
       setIsProcessing(false);
       setProcessingStatus('');
     }
-  };
+  }, [toast, onUpload]);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -82,7 +82,7 @@ const PDFUploader = ({ onUpload }: PDFUploaderProps) => {
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleFile(e.dataTransfer.files[0]);
     }
-  }, []);
+  }, [handleFile]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
