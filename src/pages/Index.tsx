@@ -148,8 +148,6 @@ const Index = () => {
                   <Button className="w-full">
                     Create Exam
                   </Button>
-                    Create Exam
-                  </Button>
                 </CardContent>
               </Card>
 

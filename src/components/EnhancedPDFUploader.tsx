@@ -1,5 +1,5 @@
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react'; // Added useRef
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Card, CardContent } from '@/components/ui/card';
@@ -18,12 +18,22 @@ const EnhancedPDFUploader = ({ onUpload }: EnhancedPDFUploaderProps) => {
   const [progress, setProgress] = useState<ProcessingProgress | null>(null);
   const [error, setError] = useState<PDFProcessingError | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null); // Added useRef for file input
   const { toast } = useToast();
+
+  const resetFileInput = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
 
   const handleFile = async (file: File) => {
     setError(null);
     setIsProcessing(true);
     setProgress(null);
+    // Note: We don't resetFileInput() here immediately,
+    // because if processing fails and user wants to retry, the file should still be in the input.
+    // Reset happens on successful upload, or when "Try Another File" is clicked.
     
     try {
       const result = await processEnhancedPDF(file, (progressInfo) => {
@@ -47,6 +57,7 @@ const EnhancedPDFUploader = ({ onUpload }: EnhancedPDFUploaderProps) => {
 
       // Reset retry count on success
       setRetryCount(0);
+      resetFileInput(); // Reset input on successful upload
     } catch (error) {
       console.error('Error processing PDF:', error);
       
@@ -80,11 +91,12 @@ const EnhancedPDFUploader = ({ onUpload }: EnhancedPDFUploaderProps) => {
       // Implement exponential backoff
       const delay = Math.pow(2, retryCount) * 1000;
       setTimeout(() => {
-        if (document.querySelector('input[type="file"]')) {
-          const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
-          if (fileInput.files && fileInput.files[0]) {
-            handleFile(fileInput.files[0]);
-          }
+        if (fileInputRef.current?.files && fileInputRef.current.files[0]) {
+          handleFile(fileInputRef.current.files[0]);
+        } else {
+          // This case should ideally not happen if retry is only possible when a file was selected
+          console.warn("Retry attempted but no file found in input ref.");
+          setError(new PDFProcessingError("Could not retry: file no longer available.", "RETRY_NO_FILE", false));
         }
       }, delay);
     }
@@ -126,7 +138,10 @@ const EnhancedPDFUploader = ({ onUpload }: EnhancedPDFUploaderProps) => {
           </div>
           <p className="text-sm text-muted-foreground mb-4">{error.message}</p>
           <Button 
-            onClick={() => setError(null)} 
+            onClick={() => {
+              setError(null);
+              resetFileInput(); // Also reset input when trying another file
+            }}
             variant="outline"
             className="w-full"
           >
@@ -142,7 +157,9 @@ const EnhancedPDFUploader = ({ onUpload }: EnhancedPDFUploaderProps) => {
       className={`relative border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
         dragActive 
           ? 'border-primary bg-primary/5' 
-          : error
+          : error && error.recoverable // Check if error is recoverable for specific styling
+          ? 'border-amber-500/50 bg-amber-500/5' // Warning style for recoverable error
+          : error // Non-recoverable error
           ? 'border-destructive/50 bg-destructive/5'
           : 'border-muted-foreground/25 hover:border-muted-foreground/50'
       }`}
@@ -170,19 +187,22 @@ const EnhancedPDFUploader = ({ onUpload }: EnhancedPDFUploaderProps) => {
         </div>
       ) : error && error.recoverable ? (
         <div className="space-y-4">
-          <div className="flex items-center justify-center space-x-2 text-destructive">
+          <div className="flex items-center justify-center space-x-2 text-amber-600 dark:text-amber-500"> {/* Warning color */}
             <AlertCircle className="w-8 h-8" />
           </div>
           <div>
-            <h3 className="text-lg font-medium text-destructive">Processing Error</h3>
+            <h3 className="text-lg font-medium text-amber-700 dark:text-amber-400">Processing Error (Recoverable)</h3> {/* Warning color */}
             <p className="text-sm text-muted-foreground mt-2">{error.message}</p>
           </div>
           <div className="flex space-x-2 justify-center">
             <Button onClick={handleRetry} disabled={retryCount >= 3}>
               <RefreshCw className="w-4 h-4 mr-2" />
-              Retry ({3 - retryCount} left)
+              Retry ({Math.max(0, 3 - retryCount)} left)
             </Button>
-            <Button variant="outline" onClick={() => setError(null)}>
+            <Button variant="outline" onClick={() => {
+              setError(null);
+              resetFileInput(); // Also reset input
+            }}>
               Try Different File
             </Button>
           </div>
@@ -206,10 +226,12 @@ const EnhancedPDFUploader = ({ onUpload }: EnhancedPDFUploaderProps) => {
           </div>
           <div className="space-y-2">
             <Button asChild className="cursor-pointer">
-              <label>
+              <label htmlFor="pdf-upload-input"> {/* Added htmlFor */}
                 <FileText className="w-4 h-4 mr-2" />
                 Choose PDF File
                 <input
+                  id="pdf-upload-input" // Added id
+                  ref={fileInputRef} // Attach ref
                   type="file"
                   accept=".pdf,application/pdf"
                   onChange={handleInputChange}
