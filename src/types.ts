@@ -1,6 +1,9 @@
 import * as pdfjsLib from 'pdfjs-dist';
 import { Worker } from 'tesseract.js';
 
+/**
+ * Core PDF Processing Types
+ */
 export interface ProcessingProgress {
   stage: 'loading' | 'extracting' | 'ocr' | 'chunking' | 'complete';
   progress: number;
@@ -33,6 +36,9 @@ export interface EnhancedPDFResult {
   };
 }
 
+/**
+ * Gemini AI Question Types
+ */
 export interface GeminiQuestion {
   id: string;
   type: 'mcq' | 'fillblank' | 'truefalse';
@@ -50,22 +56,47 @@ export interface QuestionGenerationRequest {
   difficulty: 'basic' | 'intermediate' | 'advanced';
 }
 
-// OCR Service Types
+/**
+ * OCR Service Types
+ */
 export interface OcrWorkerOptions {
   worker: Worker;
   initializationError: string | null;
   initializationPromise: Promise<void> | null;
 }
 
-// PDF Processing Types
+/**
+ * PDF Processing Utility Types
+ */
 export interface CanvasProcessingParams {
   canvas: HTMLCanvasElement;
   worker: pdfjsLib.PDFPageProxy;
   onProgress?: (progress: number) => void;
 }
 
-// Progress Reporting
-export interface ProgressReport {
-  value: number;
+/**
+ * Error Handling Types
+ */
+export type ErrorType = 
+  | 'OCR_INITIALIZATION'
+  | 'NO_TEXT_EXTRACTED'
+  | 'FILE_TOO_LARGE'
+  | 'INVALID_FILE_TYPE'
+  | 'API_KEY_REQUIRED'
+  | 'UNKNOWN_ERROR';
+
+export interface UserFacingError {
   message: string;
+  type: ErrorType;
+  timestamp: number;
+  details?: string;
+}
+
+/**
+ * Cache Types
+ */
+export interface ChunkCacheItem {
+  content: string;
+  timestamp: number;
+  chunks: string[];
 }

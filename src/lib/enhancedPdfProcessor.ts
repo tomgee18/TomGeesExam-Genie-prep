@@ -60,30 +60,7 @@ const estimateTokens = (text: string): number => {
   return Math.ceil(text.length / 4);
 };
 
-/**
- * Extract likely headings from text using regex patterns.
- * @param text The text to extract headings from.
- * @returns Array of unique headings (max 30).
- */
-const extractHeadings = (text: string): string[] => {
-  const headings: string[] = [];
-  const lines = text.split('\n');
-  for (const line of lines) {
-    const trimmedLine = line.trim();
-    if (trimmedLine.length > 0 && trimmedLine.length < 100) {
-      // Improved heading patterns
-      if (
-        (/^[A-Z][A-Za-z\s\d,:;\-]{0,80}$/.test(trimmedLine) && !/[.?!]$/.test(trimmedLine)) ||
-        /^\d+[.)]\s/.test(trimmedLine) ||
-        /^Chapter\s+\d+/i.test(trimmedLine) ||
-        /^Section\s+\d+/i.test(trimmedLine)
-      ) {
-        headings.push(trimmedLine);
-      }
-    }
-  }
-  return [...new Set(headings)].slice(0, 30);
-};
+import { extractHeadings } from './utils/heading-utils';
 
 /**
  * Chunk text into segments, mapping each chunk to real PDF page numbers.
@@ -94,62 +71,7 @@ const extractHeadings = (text: string): string[] => {
  * @returns Array of EnhancedPDFChunk objects.
  * @throws Error if input validation fails.
  */
-const chunkText = (
-  text: string,
-  paragraphPageMap: number[],
-  maxTokens: number = 2000
-): EnhancedPDFChunk[] => {
-  const chunks: EnhancedPDFChunk[] = [];
-  const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 0);
-
-  // Input validation
-  if (!Array.isArray(paragraphPageMap) || !paragraphPageMap.every(n => typeof n === 'number')) {
-    throw new Error('paragraphPageMap must be an array of numbers.');
-  }
-  if (paragraphPageMap.length !== paragraphs.length) {
-    throw new Error(`paragraphPageMap length (${paragraphPageMap.length}) does not match paragraphs length (${paragraphs.length}).`);
-  }
-
-  let currentChunk = '';
-  let chunkStart = 0;
-
-  for (let i = 0; i < paragraphs.length; i++) {
-    const paragraph = paragraphs[i].trim();
-    const potentialChunk = currentChunk + (currentChunk ? '\n\n' : '') + paragraph;
-
-    if (estimateTokens(potentialChunk) > maxTokens && currentChunk) {
-      const startPage = paragraphPageMap[chunkStart];
-      const endPage = paragraphPageMap[i - 1];
-      if (currentChunk.trim().length > 0) {
-        chunks.push({
-          content: currentChunk,
-          pageStart: startPage,
-          pageEnd: endPage,
-          tokenCount: estimateTokens(currentChunk),
-          extractionMethod: 'digital'
-        });
-      }
-      currentChunk = paragraph;
-      chunkStart = i;
-    } else {
-      currentChunk = potentialChunk;
-    }
-  }
-
-  if (currentChunk && currentChunk.trim().length > 0) {
-    const startPage = paragraphPageMap[chunkStart];
-    const endPage = paragraphPageMap[paragraphs.length - 1];
-    chunks.push({
-      content: currentChunk,
-      pageStart: startPage,
-      pageEnd: endPage,
-      tokenCount: estimateTokens(currentChunk),
-      extractionMethod: 'digital'
-    });
-  }
-
-  return chunks;
-};
+import { chunkText } from './utils/chunk-utils';
 
 
 
