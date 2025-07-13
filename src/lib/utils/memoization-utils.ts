@@ -6,6 +6,8 @@
 export const estimateTokens = (text: string): number => {
   return Math.ceil(text.length / 4);
 };
+
+/**
  * Helper function to split content into chunks based on max tokens
  * Tries to split along paragraph breaks if possible.
  * @param text The full text to split
@@ -45,20 +47,22 @@ export const splitContentIntoChunks = (text: string, maxTokens: number): string[
   // A more robust solution would re-split oversized chunks.
   return chunks.filter(chunk => chunk.length > 0);
 };
+
+/**
  * Creates a memoized version of a function that accepts multiple arguments
  * @param func The function to memoize
  * @returns Memoized function with cache
  */
 export function memoizeMultiple<T extends (...args: any[]) => any>(func: T): T {
   const cache = new Map<string, ReturnType<T>>();
-  
+
   return ((...args: Parameters<T>): ReturnType<T> => {
     const key = JSON.stringify(args);
-    
+
     if (cache.has(key)) {
       return cache.get(key) as ReturnType<T>;
     }
-    
+
     const result = func(...args);
     cache.set(key, result);
     return result;
@@ -76,24 +80,24 @@ export function memoizeAsync<T extends (...args: any[]) => Promise<any>>(
   ttl = 5000
 ): T {
   const cache = new Map<string, { result: ReturnType<T>; timestamp: number }>();
-  
+
   return ((...args: Parameters<T>): ReturnType<T> => {
     const key = JSON.stringify(args);
     const now = Date.now();
-    
+
     if (cache.has(key)) {
       const entry = cache.get(key)!;
-      
+
       if (now - entry.timestamp < ttl) {
         return entry.result as ReturnType<T>;
       }
-      
+
       cache.delete(key);
     }
-    
+
     const resultPromise = func(...args);
     cache.set(key, { result: resultPromise as ReturnType<T>, timestamp: now });
-    
+
     return resultPromise as ReturnType<T>;
   }) as T;
 }
@@ -109,24 +113,24 @@ export function memoizeChunkProcessing<T extends (content: string, chunkSize: nu
   ttl = 30000 // Default 30 seconds for chunk processing
 ): T {
   const cache = new Map<string, { result: ReturnType<T>; timestamp: number }>();
-  
+
   return ((content: string, chunkSize: number): ReturnType<T> => {
     const key = `chunk:${content.substring(0, 120)}...:${chunkSize}`;
     const now = Date.now();
-    
+
     if (cache.has(key)) {
       const entry = cache.get(key)!;
-      
+
       if (now - entry.timestamp < ttl) {
         return entry.result as ReturnType<T>;
       }
-      
+
       cache.delete(key);
     }
-    
+
     const result = func(content, chunkSize);
     cache.set(key, { result: result as ReturnType<T>, timestamp: now });
-    
+
     return result as ReturnType<T>;
   }) as T;
 }
