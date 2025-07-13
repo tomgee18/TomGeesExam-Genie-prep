@@ -1,5 +1,5 @@
 import * as pdfjsLib from 'pdfjs-dist';
-import { createWorker } from 'tesseract.js';
+import { OcrService } from './ocr-service';
 
 // Configure worker to use local version
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -152,47 +152,7 @@ const chunkText = (
 };
 
 
-// OCR processing with preprocessing
-const processPageWithOCR = async (
-  canvas: HTMLCanvasElement,
-  worker: Tesseract.Worker,
-  onProgress?: (progress: number) => void
-): Promise<{ text: string; confidence: number }> => {
-  try {
-    // Image preprocessing for better OCR
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      // Simple contrast enhancement
-      const data = imageData.data;
-      for (let i = 0; i < data.length; i += 4) {
-        const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
-        const contrast = 1.5;
-        const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
-        data[i] = Math.min(255, Math.max(0, factor * (data[i] - 128) + 128));
-        data[i + 1] = Math.min(255, Math.max(0, factor * (data[i + 1] - 128) + 128));
-        data[i + 2] = Math.min(255, Math.max(0, factor * (data[i + 2] - 128) + 128));
-      }
-      ctx.putImageData(imageData, 0, 0);
-    }
 
-    const result = await worker.recognize(canvas, {
-      logger: (m: { status: string; progress: number }) => {
-        if (m.status === 'recognizing text' && onProgress) {
-          onProgress(m.progress);
-        }
-      }
-    });
-
-    return {
-      text: result.data.text,
-      confidence: result.data.confidence
-    };
-  } catch (error) {
-    console.error('OCR processing failed:', error);
-    return { text: '', confidence: 0 };
-  }
-};
 
 /**
  * Main processing function for enhanced PDF extraction and chunking.
@@ -252,6 +212,10 @@ export const processEnhancedPDF = async (
     let totalConfidence = 0;
     let ocrPageCount = 0;
     const paragraphPageMap: number[] = [];
+    const ocrService = OcrService.getInstance();
+    let ocrInitialized = false;
+    let ocrInitializationError: string | null = null;
+
     // Process each page
     for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
       const page = await pdf.getPage(pageNum);
@@ -282,8 +246,19 @@ export const processEnhancedPDF = async (
       } else {
         // Likely scanned content, use OCR
         hasScannedContent = true;
-        await initializeOcrWorkerIfNeeded();
-        if (ocrWorker && !ocrInitializationError) {
+        
+        if (!ocrInitialized && !ocrInitializationError) {
+          try {
+            await ocrService.initializeWorker();
+            ocrInitialized = true;
+          } catch (err) {
+            ocrInitializationError =
+              'Failed to initialize OCR engine. OCR will be skipped for scanned pages.';
+            warnings.push(ocrInitializationError);
+          }
+        }
+
+        if (ocrInitialized) {
           onProgress?.({
             stage: 'ocr',
             progress,
@@ -296,7 +271,8 @@ export const processEnhancedPDF = async (
           canvas.width = viewport.width;
           if (context) {
             await page.render({ canvasContext: context, viewport: viewport }).promise;
-            const ocrResult = await processPageWithOCR(canvas, ocrWorker);
+            ocrService.preprocessCanvas(canvas);
+            const ocrResult = await ocrService.processCanvas(canvas);
             if (ocrResult.text.trim()) {
               fullText += ocrResult.text + '\n\n';
               totalConfidence += ocrResult.confidence;
