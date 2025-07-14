@@ -2,10 +2,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { OcrService } from './ocr-service';
 
 // Configure worker to use local version
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.js',
-  import.meta.url
-).toString();
+pdfjsLib.GlobalWorkerOptions.workerSrc = '/js/pdf.worker.min.js';
 
 export interface ProcessingProgress {
   stage: 'loading' | 'extracting' | 'ocr' | 'chunking' | 'complete';
