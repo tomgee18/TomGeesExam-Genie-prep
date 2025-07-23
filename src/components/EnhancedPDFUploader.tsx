@@ -1,5 +1,6 @@
 
 import PDFUploader from './PDFUploader/PDFUploader';
+import { EnhancedPDFResult } from '@/lib/enhancedPdfProcessor';
 
 interface EnhancedPDFUploaderProps {
   onUpload: (result: EnhancedPDFResult) => void;

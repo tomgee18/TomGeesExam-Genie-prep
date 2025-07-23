@@ -25,14 +25,19 @@ interface Message {
 }
 
 const ChatAssistant = ({ apiKey, content, pdfResult }: ChatAssistantProps) => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
+  const getInitialMessage = () => {
+    const initialContent = pdfResult
+      ? "Hello! I'm your AI study assistant. I've analyzed your uploaded document and I'm ready to help you understand the concepts, clarify doubts, or generate practice questions. What would you like to know?"
+      : "Hello! I'm your AI study assistant. Please upload a document, then ask me anything about its content.";
+    return {
       id: '1',
-      type: 'assistant',
-      content: "Hello! I'm your AI study assistant. I've analyzed your uploaded document and I'm ready to help you understand the concepts, clarify doubts, or generate practice questions. What would you like to know?",
+      type: 'assistant' as 'user' | 'assistant', // Ensure type correctness
+      content: initialContent,
       timestamp: new Date()
-    }
-  ]);
+    };
+  };
+
+  const [messages, setMessages] = useState<Message[]>([getInitialMessage()]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [chatProgress, setChatProgress] = useState<{ value: number; message: string } | null>(null);
