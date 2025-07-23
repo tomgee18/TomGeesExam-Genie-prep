@@ -222,7 +222,7 @@ const Index = () => {
               Back to Home
             </Button>
           ) : (
-             {/* Placeholder for potential future home-specific nav items */}
+            // Placeholder for potential future home-specific nav items
             <div />
           )}
           <div className="flex items-center space-x-2">

@@ -131,110 +131,14 @@ const callGeminiApi = async (apiKey: string, prompt: string, attempt: number = 1
   }
 };
 
-// Helper function to estimate token count
-const estimateTokens = (text: string): number => {
-  return Math.ceil(text.length / CHAR_PER_TOKEN_ESTIMATE);
-};
+import { estimateTokens } from './utils/memoization-utils';
 
-// Helper function to split content into chunks based on max tokens
-// Tries to split along paragraph breaks if possible.
-const splitContentIntoChunks = (text: string, maxTokens: number): string[] => {
-  const estimatedTotalTokens = estimateTokens(text);
-  if (estimatedTotalTokens <= maxTokens) {
-    return [text];
-  }
-
-  const chunks: string[] = [];
-  // Split by paragraphs first to maintain some coherence
-  const paragraphs = text.split(/\n\s*\n+/);
-  let currentChunk = "";
-  let currentChunkTokens = 0;
-
-  for (const paragraph of paragraphs) {
-    const paragraphTokens = estimateTokens(paragraph);
-    if (currentChunkTokens + paragraphTokens > maxTokens && currentChunkTokens > 0) {
-      chunks.push(currentChunk.trim());
-      currentChunk = paragraph;
-      currentChunkTokens = paragraphTokens;
-    } else {
-      currentChunk += (currentChunk ? "\n\n" : "") + paragraph;
-      currentChunkTokens += paragraphTokens;
-    }
-  }
-  if (currentChunk.trim()) {
-    chunks.push(currentChunk.trim());
-  }
-
-  // If any chunk is still too large after paragraph splitting (e.g. a very long single paragraph),
-  // we might need a harder split by character count or sentences.
-  // For now, this basic paragraph-based splitting is a first step.
-  // A more robust solution would re-split oversized chunks.
-  return chunks.filter(chunk => chunk.length > 0);
-};
+import { splitContentIntoChunks } from './utils/memoization-utils';
 
 
-// Helper function to parse MCQ questions from text
-// This is a simplified parser and might need to be very robust for production
-const parseMCQText = (textBlock: string, count: number): Omit<GeminiQuestion, 'id' | 'type'>[] => {
-  const questions: Omit<GeminiQuestion, 'id' | 'type'>[] = [];
-  const questionRegex = /(\d+)\.\s(.*?)\nA\)\s(.*?)\nB\)\s(.*?)\nC\)\s(.*?)\nD)\s(.*?)\nAnswer:\s([A-D])\)\s(.*?)\nExplanation:\s(.*?)(?=\n\d+\.|\n\n|$)/gs;
-  let match;
-  let parsedCount = 0;
-  while ((match = questionRegex.exec(textBlock)) !== null && parsedCount < count) {
-    questions.push({
-      question: match[2].trim(),
-      options: [match[3].trim(), match[4].trim(), match[5].trim(), match[6].trim()],
-      answer: `${match[7]}) ${match[8].trim()}`, // Store answer like "A) Option text"
-      explanation: match[9].trim(),
-    });
-    parsedCount++;
-  }
-  // If parsing fails to get enough questions, add placeholders (or handle error more gracefully)
-  while(questions.length < count) {
-    questions.push({ question: "Failed to parse MCQ", options: ["","","",""], answer: "", explanation: "Parsing error or insufficient model output."});
-  }
-  return questions.slice(0, count);
-};
-
-// Helper function to parse Fill-in-the-blank questions
-const parseFillBlankText = (textBlock: string, count: number): Omit<GeminiQuestion, 'id' | 'type'>[] => {
-  const questions: Omit<GeminiQuestion, 'id' | 'type'>[] = [];
-  const questionRegex = /(\d+)\.\s(.*?)\nAnswer:\s(.*?)\nExplanation:\s(.*?)(?=\n\d+\.|\n\n|$)/gs;
-  let match;
-  let parsedCount = 0;
-  while ((match = questionRegex.exec(textBlock)) !== null && parsedCount < count) {
-    questions.push({
-      question: match[2].trim(),
-      answer: match[3].trim(),
-      explanation: match[4].trim(),
-    });
-    parsedCount++;
-  }
-  while(questions.length < count) {
-    questions.push({ question: "Failed to parse Fill-Blank", answer: "", explanation: "Parsing error or insufficient model output."});
-  }
-  return questions.slice(0, count);
-};
-
-// Helper function to parse True/False questions
-const parseTrueFalseText = (textBlock: string, count: number): Omit<GeminiQuestion, 'id' | 'type'>[] => {
-  const questions: Omit<GeminiQuestion, 'id' | 'type'>[] = [];
-  const questionRegex = /(\d+)\.\s(.*?)\nAnswer:\s(True|False)\nExplanation:\s(.*?)(?=\n\d+\.|\n\n|$)/gis;
-  let match;
-  let parsedCount = 0;
-  while ((match = questionRegex.exec(textBlock)) !== null && parsedCount < count) {
-    questions.push({
-      question: match[2].trim(),
-      answer: match[3].toLowerCase() === 'true',
-      explanation: match[4].trim(),
-    });
-    parsedCount++;
-  }
-   while(questions.length < count) {
-    questions.push({ question: "Failed to parse T/F", answer: false, explanation: "Parsing error or insufficient model output."});
-  }
-  return questions.slice(0, count);
-};
+import { parseMCQText } from './gemini-questions/mcq-parser';
+import { parseFillBlankText } from './gemini-questions/fillblank-parser';
+import { parseTrueFalseText } from './gemini-questions/tf-parser';
 
 
 const createQuestionGenerationPrompt = (contentChunk: string, mcq: number, fill: number, tf: number, difficulty: string): string => {
@@ -318,53 +222,56 @@ export const generateQuestions = async (
 
     const currentProgress = 10 + Math.round((i / numChunks) * 80); // Progress from 10% to 90% during chunk processing
 
-    if (mcqsForThisChunk > 0) {
-      onProgress?.({ value: currentProgress, message: `Chunk ${i + 1}/${numChunks}: Generating ${mcqsForThisChunk} MCQs...` });
-      const prompt = createQuestionGenerationPrompt(chunkContent, mcqsForThisChunk, 0, 0, difficulty);
-      try {
-        const responseText = await callGeminiApi(apiKey, prompt);
-        const parsedMcqs = parseMCQText(responseText, mcqsForThisChunk);
-        parsedMcqs.forEach(q => allGeneratedQuestions.push({ ...q, id: `mcq_${overallQuestionId++}`, type: 'mcq' }));
-        totalMcqsGenerated += parsedMcqs.length; // Actual count generated
-      } catch (error) {
-        console.error(`Failed to generate or parse MCQs for chunk ${i + 1}:`, error);
-        for (let j = 0; j < mcqsForThisChunk; j++) {
-          allGeneratedQuestions.push({ id: `mcq_err_${overallQuestionId++}`, type: 'mcq', question: `Error generating MCQ (chunk ${i+1})`, options: [], answer: "", explanation: error instanceof Error ? error.message : String(error) });
-        }
+  if (mcqsForThisChunk > 0) {
+    onProgress?.({ value: currentProgress, message: `Chunk ${i + 1}/${numChunks}: Generating ${mcqsForThisChunk} MCQs...` });
+    const prompt = createQuestionGenerationPrompt(chunkContent, mcqsForThisChunk, 0, 0, difficulty);
+    try {
+      const responseText = await callGeminiApi(apiKey, prompt);
+      const { questions: parsedMcqs, newId } = parseMCQText(responseText, mcqsForThisChunk, overallQuestionId);
+      parsedMcqs.forEach(q => allGeneratedQuestions.push(q));
+      overallQuestionId = newId;
+      totalMcqsGenerated += parsedMcqs.length; // Actual count generated
+    } catch (error) {
+      console.error(`Failed to generate or parse MCQs for chunk ${i + 1}:`, error);
+      for (let j = 0; j < mcqsForThisChunk; j++) {
+        allGeneratedQuestions.push({ id: `mcq_err_${overallQuestionId++}`, type: 'mcq', question: `Error generating MCQ (chunk ${i+1})`, options: [], answer: "", explanation: error instanceof Error ? error.message : String(error) });
       }
     }
+  }
 
-    if (fillBlanksForThisChunk > 0) {
-      onProgress?.({ value: currentProgress + 5, message: `Chunk ${i + 1}/${numChunks}: Generating ${fillBlanksForThisChunk} Fill-blanks...` });
-      const prompt = createQuestionGenerationPrompt(chunkContent, 0, fillBlanksForThisChunk, 0, difficulty);
-      try {
-        const responseText = await callGeminiApi(apiKey, prompt);
-        const parsedFillBlanks = parseFillBlankText(responseText, fillBlanksForThisChunk);
-        parsedFillBlanks.forEach(q => allGeneratedQuestions.push({ ...q, id: `fill_${overallQuestionId++}`, type: 'fillblank' }));
-        totalFillBlanksGenerated += parsedFillBlanks.length;
-      } catch (error) {
-        console.error(`Failed to generate or parse Fill-blanks for chunk ${i + 1}:`, error);
-        for (let j = 0; j < fillBlanksForThisChunk; j++) {
-          allGeneratedQuestions.push({ id: `fill_err_${overallQuestionId++}`, type: 'fillblank', question: `Error generating Fill-blank (chunk ${i+1})`, answer: "", explanation: error instanceof Error ? error.message : String(error) });
-        }
+  if (fillBlanksForThisChunk > 0) {
+    onProgress?.({ value: currentProgress + 5, message: `Chunk ${i + 1}/${numChunks}: Generating ${fillBlanksForThisChunk} Fill-blanks...` });
+    const prompt = createQuestionGenerationPrompt(chunkContent, 0, fillBlanksForThisChunk, 0, difficulty);
+    try {
+      const responseText = await callGeminiApi(apiKey, prompt);
+      const { questions: parsedFillBlanks, newId } = parseFillBlankText(responseText, fillBlanksForThisChunk, overallQuestionId);
+      parsedFillBlanks.forEach(q => allGeneratedQuestions.push(q));
+      overallQuestionId = newId;
+      totalFillBlanksGenerated += parsedFillBlanks.length;
+    } catch (error) {
+      console.error(`Failed to generate or parse Fill-blanks for chunk ${i + 1}:`, error);
+      for (let j = 0; j < fillBlanksForThisChunk; j++) {
+        allGeneratedQuestions.push({ id: `fill_err_${overallQuestionId++}`, type: 'fillblank', question: `Error generating Fill-blank (chunk ${i+1})`, answer: "", explanation: error instanceof Error ? error.message : String(error) });
       }
     }
+  }
 
-    if (trueFalseForThisChunk > 0) {
-      onProgress?.({ value: currentProgress + 10, message: `Chunk ${i + 1}/${numChunks}: Generating ${trueFalseForThisChunk} T/F...` });
-      const prompt = createQuestionGenerationPrompt(chunkContent, 0, 0, trueFalseForThisChunk, difficulty);
-      try {
-        const responseText = await callGeminiApi(apiKey, prompt);
-        const parsedTrueFalse = parseTrueFalseText(responseText, trueFalseForThisChunk);
-        parsedTrueFalse.forEach(q => allGeneratedQuestions.push({ ...q, id: `tf_${overallQuestionId++}`, type: 'truefalse' }));
-        totalTrueFalseGenerated += parsedTrueFalse.length;
-      } catch (error) {
-        console.error(`Failed to generate or parse True/False for chunk ${i + 1}:`, error);
-        for (let j = 0; j < trueFalseForThisChunk; j++) {
-          allGeneratedQuestions.push({ id: `tf_err_${overallQuestionId++}`, type: 'truefalse', question: `Error generating T/F (chunk ${i+1})`, answer: false, explanation: error instanceof Error ? error.message : String(error) });
-        }
+  if (trueFalseForThisChunk > 0) {
+    onProgress?.({ value: currentProgress + 10, message: `Chunk ${i + 1}/${numChunks}: Generating ${trueFalseForThisChunk} T/F...` });
+    const prompt = createQuestionGenerationPrompt(chunkContent, 0, 0, trueFalseForThisChunk, difficulty);
+    try {
+      const responseText = await callGeminiApi(apiKey, prompt);
+      const { questions: parsedTrueFalse, newId } = parseTrueFalseText(responseText, trueFalseForThisChunk, overallQuestionId);
+      parsedTrueFalse.forEach(q => allGeneratedQuestions.push(q));
+      overallQuestionId = newId;
+      totalTrueFalseGenerated += parsedTrueFalse.length;
+    } catch (error) {
+      console.error(`Failed to generate or parse True/False for chunk ${i + 1}:`, error);
+      for (let j = 0; j < trueFalseForThisChunk; j++) {
+        allGeneratedQuestions.push({ id: `tf_err_${overallQuestionId++}`, type: 'truefalse', question: `Error generating T/F (chunk ${i+1})`, answer: false, explanation: error instanceof Error ? error.message : String(error) });
       }
     }
+  }
   }
   
   onProgress?.({ value: 100, message: "Question generation complete." });

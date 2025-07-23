@@ -5,8 +5,14 @@ import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Clock, CheckCircle, XCircle, Timer } from 'lucide-react';
 
+
+interface ExamConfig {
+  timeLimit?: number;
+  // Add other properties as needed
+}
+
 interface MockExamProps {
-  examConfig?: any;
+  examConfig?: ExamConfig;
   onComplete: () => void;
 }
 
@@ -21,7 +27,7 @@ interface Question {
 
 const MockExam = ({ examConfig, onComplete }: MockExamProps) => {
   const [currentQuestion, setCurrentQuestion] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, any>>({});
+  const [answers, setAnswers] = useState<Record<string, string | boolean>>({});
   const [timeLeft, setTimeLeft] = useState(examConfig?.timeLimit ? examConfig.timeLimit * 60 : 1800); // Use config time or default 30 minutes
   const [showResults, setShowResults] = useState(false);
   const [userAnswer, setUserAnswer] = useState<string>('');
@@ -90,19 +96,23 @@ const MockExam = ({ examConfig, onComplete }: MockExamProps) => {
 
   const handleNextQuestion = () => {
     if (currentQuestion < questions.length - 1) {
-      setCurrentQuestion(currentQuestion + 1);
-      setUserAnswer(answers[questions[currentQuestion + 1]?.id] || '');
+      const nextIndex = currentQuestion + 1;
+      setCurrentQuestion(nextIndex);
+      const nextAnswer = answers[questions[nextIndex]?.id];
+      setUserAnswer(nextAnswer !== undefined ? nextAnswer.toString() : '');
     } else {
       handleSubmitExam();
     }
-  };
+  } 
 
   const handlePrevQuestion = () => {
     if (currentQuestion > 0) {
-      setCurrentQuestion(currentQuestion - 1);
-      setUserAnswer(answers[questions[currentQuestion - 1].id] || '');
+      const prevIndex = currentQuestion - 1;
+      setCurrentQuestion(prevIndex);
+      const prevAnswer = answers[questions[prevIndex].id];
+      setUserAnswer(prevAnswer !== undefined ? prevAnswer.toString() : '');
     }
-  };
+  } 
 
   const handleSubmitExam = () => {
     setShowResults(true);
@@ -111,9 +121,17 @@ const MockExam = ({ examConfig, onComplete }: MockExamProps) => {
   const calculateScore = () => {
     let correct = 0;
     questions.forEach(question => {
-      const userAnswer = answers[question.id];
-      if (userAnswer === question.answer) {
-        correct++;
+      let userAns = answers[question.id];
+      // For true/false, compare as string
+      if (question.type === 'truefalse') {
+        userAns = userAns !== undefined ? userAns.toString() : '';
+        if (userAns === question.answer.toString()) {
+          correct++;
+        }
+      } else {
+        if (userAns === question.answer) {
+          correct++;
+        }
       }
     });
     return { correct, total: questions.length, percentage: Math.round((correct / questions.length) * 100) };
@@ -278,14 +296,14 @@ const MockExam = ({ examConfig, onComplete }: MockExamProps) => {
               <Button
                 variant={userAnswer === 'true' ? "default" : "outline"}
                 className="flex-1 py-3"
-                onClick={() => handleAnswerChange(true)}
+                onClick={() => handleAnswerChange('true')}
               >
                 True
               </Button>
               <Button
                 variant={userAnswer === 'false' ? "default" : "outline"}
                 className="flex-1 py-3"
-                onClick={() => handleAnswerChange(false)}
+                onClick={() => handleAnswerChange('false')}
               >
                 False
               </Button>
@@ -322,6 +340,6 @@ const MockExam = ({ examConfig, onComplete }: MockExamProps) => {
       </Card>
     </div>
   );
-};
+}
 
 export default MockExam;
